@@ -44,6 +44,21 @@ A Dockerized Python application for simulating FRC shooter mechanics, featuring 
    bash run.sh
    ```
 
+### Native (No Docker)
+You can run the application directly on any computer (Windows, Mac, Linux) if you have Python installed.
+
+**Prerequisites**:
+- Python 3.10 or newer.
+
+1. **Install Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. **Run**:
+   ```bash
+   python main.py
+   ```
+
 ## Troubleshooting
 - **"Authorization required..."**: Ensure you ran `bash run.sh` or executed `xhost +local:docker` manually.
 - **XCB errors**: The Dockerfile includes all necessary `libxcb` dependencies. Try rebuilding with `docker compose build --no-cache`.
