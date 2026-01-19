@@ -1,9 +1,10 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QSlider, QDoubleSpinBox, QPushButton, QComboBox, QGroupBox,
-    QTabWidget, QScrollArea, QFileDialog, QSizePolicy
+    QTabWidget, QScrollArea, QFileDialog, QSizePolicy, QCheckBox,
+    QFrame, QSpinBox, QMessageBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
@@ -38,6 +39,12 @@ class ShooterGUI(QMainWindow):
         
         self.params = initial_params.copy()
         
+        # Debounce timer for performance - prevents excessive recalculation
+        self._update_timer = QTimer()
+        self._update_timer.setSingleShot(True)
+        self._update_timer.setInterval(100)  # 100ms debounce
+        self._update_timer.timeout.connect(self._do_update)
+        
         # Main Layout
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -51,9 +58,36 @@ class ShooterGUI(QMainWindow):
         self.canvas_2d = MplCanvas(width=5, height=4, dpi=100, is_3d=False)
         self.tabs.addTab(self.canvas_2d, "2D View")
         
-        # Tab 2: 3D Plot
+        # Tab 2: 3D Plot with help button
+        tab3d_widget = QWidget()
+        tab3d_layout = QVBoxLayout(tab3d_widget)
+        tab3d_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Help button row
+        help_row = QHBoxLayout()
+        help_row.addStretch()
+        self.btn_3d_help = QPushButton("❓ Legend")
+        self.btn_3d_help.setFixedWidth(100)
+        self.btn_3d_help.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                font-weight: bold;
+                padding: 5px 10px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        self.btn_3d_help.clicked.connect(self.show_3d_legend)
+        help_row.addWidget(self.btn_3d_help)
+        tab3d_layout.addLayout(help_row)
+        
         self.canvas_3d = MplCanvas(width=5, height=4, dpi=100, is_3d=True)
-        self.tabs.addTab(self.canvas_3d, "3D View")
+        tab3d_layout.addWidget(self.canvas_3d)
+        
+        self.tabs.addTab(tab3d_widget, "3D View")
         
         # Right Side: Controls
         scroll = QScrollArea()
@@ -146,7 +180,86 @@ class ShooterGUI(QMainWindow):
         )
 
         controls_layout.addWidget(pos_group)
+        
+        # 4. Optimal Angle Calculator
+        optimal_group = QGroupBox("🎯 Optimal Angle Calculator")
+        optimal_layout = QVBoxLayout(optimal_group)
+        
+        # Target distance input
+        dist_row = QHBoxLayout()
+        dist_row.addWidget(QLabel("Target Distance (m):"))
+        self.target_distance_spin = QDoubleSpinBox()
+        self.target_distance_spin.setRange(0.5, 10.0)
+        self.target_distance_spin.setValue(3.0)
+        self.target_distance_spin.setSingleStep(0.1)
+        dist_row.addWidget(self.target_distance_spin)
+        optimal_layout.addLayout(dist_row)
+        
+        # Calculate button
+        self.btn_calc_optimal = QPushButton("Calculate Optimal Angle")
+        self.btn_calc_optimal.clicked.connect(self.on_calculate_optimal)
+        self.btn_calc_optimal.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 8px;")
+        optimal_layout.addWidget(self.btn_calc_optimal)
+        
+        # Result display
+        self.optimal_result_label = QLabel("Click to calculate...")
+        self.optimal_result_label.setWordWrap(True)
+        self.optimal_result_label.setStyleSheet("background-color: #f0f0f0; padding: 8px; border-radius: 4px;")
+        optimal_layout.addWidget(self.optimal_result_label)
+        
+        # Apply optimal button
+        self.btn_apply_optimal = QPushButton("Apply Optimal Angle")
+        self.btn_apply_optimal.clicked.connect(self.on_apply_optimal)
+        self.btn_apply_optimal.setEnabled(False)
+        optimal_layout.addWidget(self.btn_apply_optimal)
+        
+        controls_layout.addWidget(optimal_group)
+        
+        # 5. Impact Zone Settings
+        impact_group = QGroupBox("🎪 Impact Zone Visualization")
+        impact_layout = QVBoxLayout(impact_group)
+        
+        self.show_impact_zone = QCheckBox("Show Impact Zone (3D)")
+        self.show_impact_zone.setChecked(True)
+        self.show_impact_zone.stateChanged.connect(self.update_params_and_plot)
+        impact_layout.addWidget(self.show_impact_zone)
+        
+        # Variance controls
+        var_row1 = QHBoxLayout()
+        var_row1.addWidget(QLabel("Angle variance (±deg):"))
+        self.angle_variance_spin = QDoubleSpinBox()
+        self.angle_variance_spin.setRange(0.5, 5.0)
+        self.angle_variance_spin.setValue(2.0)
+        self.angle_variance_spin.setSingleStep(0.5)
+        self.angle_variance_spin.valueChanged.connect(self.update_params_and_plot)
+        var_row1.addWidget(self.angle_variance_spin)
+        impact_layout.addLayout(var_row1)
+        
+        var_row2 = QHBoxLayout()
+        var_row2.addWidget(QLabel("RPM variance (±%):"))
+        self.rpm_variance_spin = QDoubleSpinBox()
+        self.rpm_variance_spin.setRange(1.0, 10.0)
+        self.rpm_variance_spin.setValue(3.0)
+        self.rpm_variance_spin.setSingleStep(0.5)
+        self.rpm_variance_spin.valueChanged.connect(self.update_params_and_plot)
+        var_row2.addWidget(self.rpm_variance_spin)
+        impact_layout.addLayout(var_row2)
+        
+        controls_layout.addWidget(impact_group)
+        
+        # 6. Statistics Panel
+        stats_group = QGroupBox("📊 Shot Statistics")
+        stats_layout = QVBoxLayout(stats_group)
+        self.stats_label = QLabel("Calculating...")
+        self.stats_label.setWordWrap(True)
+        self.stats_label.setStyleSheet("font-family: monospace; background-color: #1e1e1e; color: #00ff00; padding: 10px; border-radius: 4px;")
+        stats_layout.addWidget(self.stats_label)
+        controls_layout.addWidget(stats_group)
+        
         controls_layout.addStretch()
+        
+        # Store last optimal result
+        self._last_optimal_result = None
 
         # Initial Draw
         self.update_plots()
@@ -208,6 +321,11 @@ class ShooterGUI(QMainWindow):
         self.update_params_and_plot()
 
     def update_params_and_plot(self):
+        """Schedule an update with debounce to prevent excessive recalculation."""
+        self._update_timer.start()  # Restarts the timer if already running
+    
+    def _do_update(self):
+        """Actually perform the parameter update and redraw plots."""
         # Read all inputs
         self.params['O_b'] = m.radians(self.inputs['angle'].value())
         self.params['w'] = self.inputs['rpm'].value()
@@ -225,6 +343,18 @@ class ShooterGUI(QMainWindow):
         # Calc simulation
         res = sim.calculate_simulation(self.params)
         iPoints, ideal_point, frPoints, frIdealPoint, iPoints_xyz, frPoints_xyz = res
+        
+        # Calculate impact zone if enabled
+        impact_zone = None
+        if self.show_impact_zone.isChecked():
+            impact_zone = sim.calculate_impact_zone(
+                self.params,
+                angle_variance_deg=self.angle_variance_spin.value(),
+                rpm_variance_pct=self.rpm_variance_spin.value()
+            )
+        
+        # Update statistics
+        self.update_statistics(frIdealPoint, impact_zone)
         
         # 2D Plot
         ax2 = self.canvas_2d.axes
@@ -253,7 +383,138 @@ class ShooterGUI(QMainWindow):
         sim.draw_field(ax3)
         sim.plotIdeal3D(ax3, iPoints_xyz)
         sim.plotFriction3D(ax3, frPoints_xyz)
+        
+        # Draw impact zone if enabled
+        if impact_zone and self.show_impact_zone.isChecked():
+            sim.draw_impact_zone(ax3, impact_zone)
+        
         self.canvas_3d.draw()
+    
+    def update_statistics(self, frIdealPoint, impact_zone):
+        """Update the statistics display panel."""
+        stats_lines = []
+        
+        # Flight info
+        if frIdealPoint:
+            stats_lines.append(f"Distance:     {frIdealPoint[0]:.2f} m")
+            stats_lines.append(f"Flight Time:  {frIdealPoint[2]:.3f} s")
+            stats_lines.append(f"Target Height:{frIdealPoint[1]:.2f} m")
+        else:
+            stats_lines.append("Ball does not reach target height")
+        
+        stats_lines.append("─" * 25)
+        
+        # Impact zone info
+        if impact_zone:
+            stats_lines.append(f"Accuracy:     {impact_zone['target_probability']:.0f}%")
+            stats_lines.append(f"Spread:       {impact_zone['radius']*100:.1f} cm")
+            stats_lines.append(f"Max Height:   {impact_zone['max_height']:.2f} m")
+            
+            if impact_zone['in_target']:
+                stats_lines.append("Status:       ✅ ON TARGET")
+            else:
+                stats_lines.append("Status:       ❌ OFF TARGET")
+        
+        self.stats_label.setText("\n".join(stats_lines))
+    
+    def on_calculate_optimal(self):
+        """Calculate the optimal angle for the target distance."""
+        target_dist = self.target_distance_spin.value()
+        
+        self.optimal_result_label.setText("Calculating...")
+        self.optimal_result_label.repaint()
+        
+        result = sim.calculate_optimal_angle(self.params, target_dist)
+        self._last_optimal_result = result
+        
+        if result['success']:
+            text = f"✅ Optimal Angle: {result['optimal_angle_deg']:.1f}°\n"
+            text += f"Flight Time: {result['flight_time']:.3f}s\n"
+            text += f"Landing Error: {result['error']*100:.1f}cm"
+            self.optimal_result_label.setStyleSheet("background-color: #c8e6c9; padding: 8px; border-radius: 4px;")
+            self.btn_apply_optimal.setEnabled(True)
+        else:
+            text = f"⚠️ {result['message']}\n"
+            text += f"Best angle: {result['optimal_angle_deg']:.1f}°\n"
+            text += f"Consider increasing RPM"
+            self.optimal_result_label.setStyleSheet("background-color: #ffcdd2; padding: 8px; border-radius: 4px;")
+            self.btn_apply_optimal.setEnabled(True)
+        
+        self.optimal_result_label.setText(text)
+    
+    def on_apply_optimal(self):
+        """Apply the calculated optimal angle."""
+        if self._last_optimal_result:
+            optimal_angle = self._last_optimal_result['optimal_angle_deg']
+            self.inputs['angle'].setValue(optimal_angle)
+            # This will trigger update_params_and_plot via signal
+    
+    def show_3d_legend(self):
+        """Show a legend explaining all 3D graph elements."""
+        legend_text = """
+<h2>🎯 3D Grafik Açıklaması / 3D Graph Legend</h2>
+
+<h3>📍 Trajektori Çizgileri / Trajectory Lines</h3>
+<table border="1" cellpadding="5">
+<tr><td style="background-color: black; color: white;">■ Siyah / Black</td>
+    <td><b>İdeal Trajektori / Ideal Trajectory</b><br>
+    Hava direnci olmadan / Without air resistance</td></tr>
+<tr><td style="background-color: green; color: white;">■ Yeşil / Green</td>
+    <td><b>Gerçekçi Trajektori / Realistic Trajectory</b><br>
+    Hava direnci + Magnus etkisi / With drag + Magnus effect</td></tr>
+</table>
+
+<h3>🏟️ Saha Elemanları / Field Elements</h3>
+<table border="1" cellpadding="5">
+<tr><td style="background-color: gray;">■ Gri / Gray</td>
+    <td><b>Zemin ve Duvarlar / Ground & Walls</b><br>
+    FRC sahası sınırları / FRC field boundaries</td></tr>
+<tr><td style="background-color: purple; color: white;">■ Mor / Purple</td>
+    <td><b>Hub (Hedef / Target)</b><br>
+    Topun girmesi gereken hedef / Ball scoring target</td></tr>
+<tr><td style="background-color: black; color: white;">■ Siyah / Black Lines</td>
+    <td><b>Hub Direği / Hub Post</b><br>
+    Hub'ı tutan yapı / Supporting structure</td></tr>
+</table>
+
+<h3>🎪 İsabet Zonu / Impact Zone</h3>
+<table border="1" cellpadding="5">
+<tr><td style="background-color: red; color: white;">● Kırmızı / Red Dots</td>
+    <td><b>Olası Düşme Noktaları / Possible Landing Points</b><br>
+    Açı ve RPM varyansına göre / Based on angle & RPM variance</td></tr>
+<tr><td style="background-color: red; color: white;">○ Kırmızı Daire / Red Circle</td>
+    <td><b>Yayılma Alanı / Spread Area</b><br>
+    Tüm noktaları kapsayan / Encompasses all points</td></tr>
+<tr><td style="background-color: yellow;">★ Sarı Yıldız / Yellow Star</td>
+    <td><b>Merkez Nokta / Center Point</b><br>
+    Ortalama düşme noktası / Average landing position</td></tr>
+</table>
+
+<h3>📐 Eksenler / Axes</h3>
+<ul>
+<li><b>X:</b> Sahanın uzunluğu / Field length (robot → hub)</li>
+<li><b>Y:</b> Sahanın genişliği / Field width</li>
+<li><b>Z:</b> Yükseklik / Height</li>
+</ul>
+
+<h3>🎮 Kontroller / Controls</h3>
+<ul>
+<li><b>Sol tık + sürükle / Left click + drag:</b> Döndür / Rotate</li>
+<li><b>Sağ tık + sürükle / Right click + drag:</b> Yakınlaştır / Zoom</li>
+<li><b>Orta tık + sürükle / Middle click + drag:</b> Kaydır / Pan</li>
+</ul>
+
+<hr>
+<i>Hub Yüksekliği / Height: ~1.87m | Hub Yarıçapı / Radius: ~0.57m</i>
+"""
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("3D Grafik Açıklaması / 3D Graph Legend")
+        msg.setTextFormat(Qt.TextFormat.RichText)
+        msg.setText(legend_text)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
 
     def refresh_file_list(self):
         self.file_combo.clear()
