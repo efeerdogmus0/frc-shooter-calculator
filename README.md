@@ -59,8 +59,6 @@ See where your shots will actually land:
 - Spread radius
 - On-target status indicator
 
-### ❓ Interactive Legend (TR/EN)
-Bilingual help system explaining all graph elements for international FRC teams.
 
 ---
 
@@ -176,19 +174,6 @@ frcshooter/
 ├── run.sh           # Linux/macOS launcher
 └── requirements.txt # Python dependencies
 ```
-
----
-
-## 🔬 Comparison: Desmos vs Python
-
-| Feature | Desmos Calculator | Python Program |
-|---------|------------------|----------------|
-| Air Drag | ❌ Not included | ✅ Numerical iteration |
-| Magnus Effect | ❌ Not included | ✅ Calculated |
-| 3D Visualization | ❌ 2D only | ✅ Full 3D field |
-| Optimal Angle | ❌ Manual | ✅ Auto-calculated |
-| Impact Zone | ❌ Single point | ✅ Variance analysis |
-| Save/Load | ❌ No | ✅ JSON configs |
 
 ---
 
